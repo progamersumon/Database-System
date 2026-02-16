@@ -38,7 +38,6 @@ const App: React.FC = () => {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [attendanceList, setAttendanceList] = useState<any[]>([]);
 
-  // Lifted Leave Info State
   const [leaveHistory, setLeaveHistory] = useState<LeaveRecord[]>([]);
   const [leaveQuotas, setLeaveQuotas] = useState<LeaveType[]>([
     { id: 'casual', type: 'Casual Leave', total: 10, color: 'bg-amber-500' },
@@ -46,42 +45,32 @@ const App: React.FC = () => {
     { id: 'annual', type: 'Annual Leave', total: 20, color: 'bg-blue-500' },
   ]);
 
-  // Lifted Payroll Info State
   const [payrollProfile, setPayrollProfile] = useState<PayrollProfile>({
-    name: 'Tanim Ahmed',
-    role: 'Senior Developer',
-    department: 'Engineering',
-    employeeId: 'EMP-202409',
-    imageUrl: 'https://picsum.photos/seed/tanim/200/200',
-    grossSalary: 65000,
-    baseDeduction: 2450,
-    basicSalary: 41700,
-    houseRent: 20850,
-    medical: 750,
-    conveyance: 450,
-    food: 1250,
-    attendanceBonus: 925,
-    tiffinBillDays: 25,
-    tiffinRate: 50,
-    yearlyBonus: 43333,
-    eidBonus: 41700
+    name: 'User',
+    role: 'Employee',
+    department: 'General',
+    employeeId: 'EMP-001',
+    imageUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=default',
+    grossSalary: 0,
+    baseDeduction: 0,
+    basicSalary: 0,
+    houseRent: 0,
+    medical: 0,
+    conveyance: 0,
+    food: 0,
+    attendanceBonus: 0,
+    tiffinBillDays: 0,
+    tiffinRate: 0,
+    yearlyBonus: 0,
+    eidBonus: 0
   });
 
-  const [salaryHistory, setSalaryHistory] = useState<SalaryIncrement[]>([
-    { id: '1', year: 2025, inc: 9.0, amt: 2364, total: 31083 },
-    { id: '2', year: 2024, inc: 7.0, amt: 1719, total: 28719 },
-    { id: '3', year: 2023, inc: 0.0, amt: 2000, total: 27000 },
-    { id: '4', year: 2023, inc: 14.9, amt: 3000, total: 25000 },
-    { id: '5', year: 2022, inc: 23.0, amt: 3772, total: 22000 },
-    { id: '6', year: 2021, inc: 10.0, amt: 1489, total: 18228 },
-    { id: '7', year: 2020, inc: 10.0, amt: 1354, total: 16739 },
-    { id: '8', year: 2019, inc: 7.0, amt: 886, total: 15386 },
-    { id: '9', year: 2018, inc: 0.0, amt: 0, total: 14500 },
-  ]);
+  const [salaryHistory, setSalaryHistory] = useState<SalaryIncrement[]>([]);
 
-  // 1. Initial Auth Check
+  // 1. Initial Auth Check & Session Management
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         setCurrentUser({
           name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
@@ -90,71 +79,91 @@ const App: React.FC = () => {
           imageUrl: session.user.user_metadata?.imageUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.email}`
         });
       }
-    });
+    };
+
+    checkSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user) {
+      if (event === 'SIGNED_IN' && session?.user) {
         setCurrentUser({
           name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
           email: session.user.email || '',
           role: session.user.user_metadata?.role || 'User',
           imageUrl: session.user.user_metadata?.imageUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.email}`
         });
-      } else {
-        setCurrentUser(null);
-        isInitialLoadRef.current = false;
+      } else if (event === 'SIGNED_OUT') {
+        handleStateReset();
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Data Fetching from Supabase (Runs only once on login)
+  // Reset all states to initial values on logout
+  const handleStateReset = () => {
+    setCurrentUser(null);
+    setTransactions([]);
+    setSavingsGoals([]);
+    setSavingsRecords([]);
+    setBillRecords([]);
+    setBettingRecords([]);
+    setAttendanceList([]);
+    setReminders([]);
+    setLeaveHistory([]);
+    setSalaryHistory([]);
+    isInitialLoadRef.current = false;
+    setActiveTab(AppTab.DASHBOARD);
+  };
+
+  // 2. Data Fetching from Supabase
   useEffect(() => {
     if (!currentUser || isInitialLoadRef.current) return;
 
     const loadData = async () => {
       setIsLoadingData(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
 
-      const { data, error } = await supabase
-        .from('user_data')
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
+        const { data, error } = await supabase
+          .from('user_data')
+          .select('*')
+          .eq('user_id', user.id)
+          .maybeSingle();
 
-      if (!error && data?.payload) {
-        const p = data.payload;
-        if (p.transactions) setTransactions(p.transactions);
-        if (p.savingsGoals) setSavingsGoals(p.savingsGoals);
-        if (p.savingsRecords) setSavingsRecords(p.savingsRecords);
-        if (p.billRecords) setBillRecords(p.billRecords);
-        if (p.bettingRecords) setBettingRecords(p.bettingRecords);
-        if (p.attendanceList) setAttendanceList(p.attendanceList);
-        if (p.reminders) setReminders(p.reminders);
-        if (p.language) setLanguage(p.language);
-        if (p.leaveHistory) setLeaveHistory(p.leaveHistory);
-        if (p.leaveQuotas) setLeaveQuotas(p.leaveQuotas);
-        if (p.payrollProfile) setPayrollProfile(p.payrollProfile);
-        if (p.salaryHistory) setSalaryHistory(p.salaryHistory);
+        if (!error && data?.payload) {
+          const p = data.payload;
+          if (p.transactions) setTransactions(p.transactions);
+          if (p.savingsGoals) setSavingsGoals(p.savingsGoals);
+          if (p.savingsRecords) setSavingsRecords(p.savingsRecords);
+          if (p.billRecords) setBillRecords(p.billRecords);
+          if (p.bettingRecords) setBettingRecords(p.bettingRecords);
+          if (p.attendanceList) setAttendanceList(p.attendanceList);
+          if (p.reminders) setReminders(p.reminders);
+          if (p.language) setLanguage(p.language);
+          if (p.leaveHistory) setLeaveHistory(p.leaveHistory);
+          if (p.leaveQuotas) setLeaveQuotas(p.leaveQuotas);
+          if (p.payrollProfile) setPayrollProfile(p.payrollProfile);
+          if (p.salaryHistory) setSalaryHistory(p.salaryHistory);
+        }
+      } catch (err) {
+        console.error("Data load failed:", err);
+      } finally {
+        isInitialLoadRef.current = true;
+        setIsLoadingData(false);
       }
-      
-      isInitialLoadRef.current = true;
-      setIsLoadingData(false);
     };
 
     loadData();
-  }, [currentUser?.email]); // Depend on email to prevent reload on property change
+  }, [currentUser]);
 
-  // 3. Data Sync to Supabase
+  // 3. Data Sync to Supabase with debounce
   useEffect(() => {
-    // Only sync if initial load is complete and user is logged in
     if (!currentUser || !isInitialLoadRef.current) return;
 
     const syncToCloud = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
+      if (!session?.user) return; // Prevent "Failed to fetch" on expired session
 
       setIsSyncing(true);
       const payload = {
@@ -179,7 +188,7 @@ const App: React.FC = () => {
           payload: payload
         }, { onConflict: 'user_id' });
       } catch (err) {
-        console.error("Sync failed:", err);
+        console.error("Auto-sync failed:", err);
       } finally {
         setIsSyncing(false);
       }
@@ -190,7 +199,7 @@ const App: React.FC = () => {
   }, [
     transactions, savingsGoals, savingsRecords, billRecords, bettingRecords, 
     attendanceList, reminders, language, leaveHistory, leaveQuotas, 
-    payrollProfile, salaryHistory, currentUser?.email
+    payrollProfile, salaryHistory
   ]);
 
   useEffect(() => {
@@ -220,9 +229,13 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setCurrentUser(null);
-    setActiveTab(AppTab.DASHBOARD);
+    try {
+      await supabase.auth.signOut();
+      // handleStateReset will be triggered by onAuthStateChange
+    } catch (err) {
+      console.error("Logout error:", err);
+      handleStateReset(); // Fallback
+    }
   };
 
   if (!currentUser) {
