@@ -14,7 +14,7 @@ import BettingInfoView from './components/BettingInfoView';
 import SettingsView from './components/SettingsView';
 import RemindersView from './components/RemindersView';
 import AuthView from './components/AuthView';
-import { Menu, X, Database } from 'lucide-react';
+import { Menu, X, Database, Loader2 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 const App: React.FC = () => {
@@ -22,7 +22,7 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const isInitialLoadRef = useRef(false);
+  const [hasFetchedInitialData, setHasFetchedInitialData] = useState(false);
   const mainContentRef = useRef<HTMLElement>(null);
   
   // Auth State
@@ -37,16 +37,12 @@ const App: React.FC = () => {
   const [bettingRecords, setBettingRecords] = useState<BettingRecord[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [attendanceList, setAttendanceList] = useState<any[]>([]);
-
-  // Lifted Leave Info State
   const [leaveHistory, setLeaveHistory] = useState<LeaveRecord[]>([]);
   const [leaveQuotas, setLeaveQuotas] = useState<LeaveType[]>([
     { id: 'casual', type: 'Casual Leave', total: 10, color: 'bg-amber-500' },
     { id: 'medical', type: 'Medical Leave', total: 14, color: 'bg-rose-500' },
     { id: 'annual', type: 'Annual Leave', total: 20, color: 'bg-blue-500' },
   ]);
-
-  // Lifted Payroll Info State
   const [payrollProfile, setPayrollProfile] = useState<PayrollProfile>({
     name: 'Tanim Ahmed',
     role: 'Senior Developer',
@@ -66,18 +62,7 @@ const App: React.FC = () => {
     yearlyBonus: 43333,
     eidBonus: 41700
   });
-
-  const [salaryHistory, setSalaryHistory] = useState<SalaryIncrement[]>([
-    { id: '1', year: 2025, inc: 9.0, amt: 2364, total: 31083 },
-    { id: '2', year: 2024, inc: 7.0, amt: 1719, total: 28719 },
-    { id: '3', year: 2023, inc: 0.0, amt: 2000, total: 27000 },
-    { id: '4', year: 2023, inc: 14.9, amt: 3000, total: 25000 },
-    { id: '5', year: 2022, inc: 23.0, amt: 3772, total: 22000 },
-    { id: '6', year: 2021, inc: 10.0, amt: 1489, total: 18228 },
-    { id: '7', year: 2020, inc: 10.0, amt: 1354, total: 16739 },
-    { id: '8', year: 2019, inc: 7.0, amt: 886, total: 15386 },
-    { id: '9', year: 2018, inc: 0.0, amt: 0, total: 14500 },
-  ]);
+  const [salaryHistory, setSalaryHistory] = useState<SalaryIncrement[]>([]);
 
   // 1. Initial Auth Check
   useEffect(() => {
@@ -102,21 +87,24 @@ const App: React.FC = () => {
         });
       } else {
         setCurrentUser(null);
-        isInitialLoadRef.current = false;
+        setHasFetchedInitialData(false);
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Data Fetching from Supabase (Runs only once on login)
+  // 2. Data Fetching from Supabase
   useEffect(() => {
-    if (!currentUser || isInitialLoadRef.current) return;
+    if (!currentUser || hasFetchedInitialData) return;
 
     const loadData = async () => {
       setIsLoadingData(true);
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setIsLoadingData(false);
+        return;
+      }
 
       const { data, error } = await supabase
         .from('user_data')
@@ -140,17 +128,17 @@ const App: React.FC = () => {
         if (p.salaryHistory) setSalaryHistory(p.salaryHistory);
       }
       
-      isInitialLoadRef.current = true;
+      setHasFetchedInitialData(true);
       setIsLoadingData(false);
     };
 
     loadData();
-  }, [currentUser?.email]); // Depend on email to prevent reload on property change
+  }, [currentUser?.email, hasFetchedInitialData]);
 
-  // 3. Data Sync to Supabase
+  // 3. Data Sync to Supabase (Guarded)
   useEffect(() => {
-    // Only sync if initial load is complete and user is logged in
-    if (!currentUser || !isInitialLoadRef.current) return;
+    // CRITICAL: Only sync if we've successfully finished fetching initial data
+    if (!currentUser || !hasFetchedInitialData || isLoadingData) return;
 
     const syncToCloud = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -190,7 +178,7 @@ const App: React.FC = () => {
   }, [
     transactions, savingsGoals, savingsRecords, billRecords, bettingRecords, 
     attendanceList, reminders, language, leaveHistory, leaveQuotas, 
-    payrollProfile, salaryHistory, currentUser?.email
+    payrollProfile, salaryHistory, currentUser?.email, hasFetchedInitialData, isLoadingData
   ]);
 
   useEffect(() => {
@@ -222,11 +210,29 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setCurrentUser(null);
+    setHasFetchedInitialData(false);
     setActiveTab(AppTab.DASHBOARD);
   };
 
   if (!currentUser) {
     return <AuthView language={language} onAuthSuccess={(user) => setCurrentUser(user)} />;
+  }
+
+  // Global Hydration Screen
+  if (isLoadingData && !hasFetchedInitialData) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-white dark:bg-slate-950">
+        <div className="flex flex-col items-center gap-4 animate-in fade-in duration-500">
+          <div className="w-16 h-16 bg-purple-600 rounded-[24px] flex items-center justify-center text-white shadow-xl shadow-purple-600/20">
+            <Database size={32} className="animate-pulse" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Loader2 size={18} className="animate-spin text-purple-600" />
+            <span className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em]">Synchronizing Your Cloud Database...</span>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -256,9 +262,9 @@ const App: React.FC = () => {
           language={language}
           profile={currentUser}
         />
-        {(isLoadingData || isSyncing) && (
-          <div className="absolute top-14 left-0 w-full h-0.5 bg-indigo-600 animate-pulse z-50 overflow-hidden">
-             <div className="w-full h-full bg-indigo-400 animate-[shimmer_2s_infinite]"></div>
+        {(isSyncing) && (
+          <div className="absolute top-[56px] left-0 w-full h-0.5 bg-indigo-600/20 z-[60] overflow-hidden">
+             <div className="w-full h-full bg-indigo-600 animate-[shimmer_2s_infinite]"></div>
           </div>
         )}
         <main ref={mainContentRef} className="flex-1 overflow-y-auto w-full p-4 md:p-8 mt-0 custom-scrollbar">
