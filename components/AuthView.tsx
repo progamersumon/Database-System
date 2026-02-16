@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { User as UserIcon, Lock, Mail, ChevronRight, ArrowLeft, ShieldCheck, CheckCircle, AlertCircle } from 'lucide-react';
 import { User } from '../types';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
 
 interface AuthViewProps {
@@ -124,12 +124,10 @@ const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, language }) => {
           onAuthSuccess(userToLogin);
         }
       } else if (mode === 'SIGNUP') {
-        // Create a temporary client that doesn't persist the session to prevent auto-login flicker
-        const tempSupabase = createClient(
-          'https://krlvfsgqolaknhivnple.supabase.co',
-          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtybHZmc2dxb2xha25oaXZucGxlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyMTkxMzYsImV4cCI6MjA4Njc5NTEzNn0.gkxQeyEdK-hqylo9-dScYzW8g7suxjtrftoFSsPRhC4',
-          { auth: { persistSession: false, autoRefreshToken: false } }
-        );
+        // Use shared config for temp supabase client
+        const tempSupabase = createClient(supabaseUrl, supabaseAnonKey, { 
+          auth: { persistSession: false, autoRefreshToken: false } 
+        });
 
         const { error } = await tempSupabase.auth.signUp({
           email: formData.email,
@@ -145,7 +143,6 @@ const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, language }) => {
 
         if (error) throw error;
 
-        // Success state
         setShowSuccessToast(true);
         setFormData(prev => ({ ...prev, password: '' }));
         setMode('LOGIN');

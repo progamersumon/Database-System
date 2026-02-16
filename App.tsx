@@ -21,6 +21,8 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>(AppTab.DASHBOARD);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const isInitialLoadRef = useRef(false);
   const mainContentRef = useRef<HTMLElement>(null);
   
   // Auth State
@@ -77,7 +79,7 @@ const App: React.FC = () => {
     { id: '9', year: 2018, inc: 0.0, amt: 0, total: 14500 },
   ]);
 
-  // 1. Initial Auth Check & Session Listener
+  // 1. Initial Auth Check
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
@@ -90,7 +92,7 @@ const App: React.FC = () => {
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
         setCurrentUser({
           name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
@@ -100,15 +102,16 @@ const App: React.FC = () => {
         });
       } else {
         setCurrentUser(null);
+        isInitialLoadRef.current = false;
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Data Fetching from Supabase
+  // 2. Data Fetching from Supabase (Runs only once on login)
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || isInitialLoadRef.current) return;
 
     const loadData = async () => {
       setIsLoadingData(true);
@@ -119,7 +122,7 @@ const App: React.FC = () => {
         .from('user_data')
         .select('*')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
       if (!error && data?.payload) {
         const p = data.payload;
@@ -131,38 +134,29 @@ const App: React.FC = () => {
         if (p.attendanceList) setAttendanceList(p.attendanceList);
         if (p.reminders) setReminders(p.reminders);
         if (p.language) setLanguage(p.language);
-        // Load lifted states
         if (p.leaveHistory) setLeaveHistory(p.leaveHistory);
         if (p.leaveQuotas) setLeaveQuotas(p.leaveQuotas);
         if (p.payrollProfile) setPayrollProfile(p.payrollProfile);
         if (p.salaryHistory) setSalaryHistory(p.salaryHistory);
-      } else {
-        // Fallback to local storage if no Supabase data found
-        const loadLocal = (key: string, setter: Function) => {
-          const val = localStorage.getItem(key);
-          if (val) setter(JSON.parse(val));
-        };
-        loadLocal('app_transactions', setTransactions);
-        loadLocal('app_savings_goals', setSavingsGoals);
-        loadLocal('app_reminders', setReminders);
-        loadLocal('app_leave_history', setLeaveHistory);
-        loadLocal('app_payroll_profile', setPayrollProfile);
-        loadLocal('app_salary_history', setSalaryHistory);
       }
+      
+      isInitialLoadRef.current = true;
       setIsLoadingData(false);
     };
 
     loadData();
-  }, [currentUser]);
+  }, [currentUser?.email]); // Depend on email to prevent reload on property change
 
   // 3. Data Sync to Supabase
   useEffect(() => {
-    if (!currentUser) return;
+    // Only sync if initial load is complete and user is logged in
+    if (!currentUser || !isInitialLoadRef.current) return;
 
     const syncToCloud = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return;
 
+      setIsSyncing(true);
       const payload = {
         transactions,
         savingsGoals,
@@ -179,27 +173,24 @@ const App: React.FC = () => {
         updated_at: new Date().toISOString()
       };
 
-      // Also save to local storage for offline support
-      localStorage.setItem('app_transactions', JSON.stringify(transactions));
-      localStorage.setItem('app_savings_goals', JSON.stringify(savingsGoals));
-      localStorage.setItem('app_reminders', JSON.stringify(reminders));
-      localStorage.setItem('app_leave_history', JSON.stringify(leaveHistory));
-      localStorage.setItem('app_payroll_profile', JSON.stringify(payrollProfile));
-      localStorage.setItem('app_salary_history', JSON.stringify(salaryHistory));
-
-      // Attempt to upsert to Supabase
-      await supabase.from('user_data').upsert({
-        user_id: user.id,
-        payload: payload
-      }, { onConflict: 'user_id' });
+      try {
+        await supabase.from('user_data').upsert({
+          user_id: session.user.id,
+          payload: payload
+        }, { onConflict: 'user_id' });
+      } catch (err) {
+        console.error("Sync failed:", err);
+      } finally {
+        setIsSyncing(false);
+      }
     };
 
-    const timer = setTimeout(syncToCloud, 2000); // Debounced sync
+    const timer = setTimeout(syncToCloud, 2000); 
     return () => clearTimeout(timer);
   }, [
     transactions, savingsGoals, savingsRecords, billRecords, bettingRecords, 
-    attendanceList, reminders, language, currentUser, 
-    leaveHistory, leaveQuotas, payrollProfile, salaryHistory
+    attendanceList, reminders, language, leaveHistory, leaveQuotas, 
+    payrollProfile, salaryHistory, currentUser?.email
   ]);
 
   useEffect(() => {
@@ -250,7 +241,7 @@ const App: React.FC = () => {
           <div className="flex justify-between items-center p-4 border-b dark:border-slate-800">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white"><Database size={18} /></div>
-              <span className="font-bold text-sm text-indigo-600 dark:text-indigo-400 uppercase tracking-tight">Data Management Software</span>
+              <span className="font-bold text-sm text-indigo-600 dark:text-indigo-400 uppercase tracking-tight">DataFlow</span>
             </div>
             <button onClick={() => setIsSidebarOpen(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-800 rounded text-gray-400"><X size={20} /></button>
           </div>
@@ -265,8 +256,10 @@ const App: React.FC = () => {
           language={language}
           profile={currentUser}
         />
-        {isLoadingData && (
-          <div className="absolute top-14 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>
+        {(isLoadingData || isSyncing) && (
+          <div className="absolute top-14 left-0 w-full h-0.5 bg-indigo-600 animate-pulse z-50 overflow-hidden">
+             <div className="w-full h-full bg-indigo-400 animate-[shimmer_2s_infinite]"></div>
+          </div>
         )}
         <main ref={mainContentRef} className="flex-1 overflow-y-auto w-full p-4 md:p-8 mt-0 custom-scrollbar">
           <div className="max-w-7xl mx-auto">

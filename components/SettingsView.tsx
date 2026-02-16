@@ -15,8 +15,10 @@ import {
   X,
   Lock,
   KeyRound,
-  ShieldCheck
+  ShieldCheck,
+  Loader2
 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface SettingsViewProps {
   language: 'English' | 'বাংলা';
@@ -34,6 +36,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ language, setLanguage, prof
   const [isDarkMode, setIsDarkMode] = useState(document.documentElement.classList.contains('dark'));
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   
   const [tempProfile, setTempProfile] = useState(profile);
 
@@ -50,6 +53,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ language, setLanguage, prof
       fullName: 'Full Name',
       role: 'Role/Designation',
       saveChanges: 'Save Changes',
+      saving: 'Saving...',
       editProfile: 'Edit Profile',
       appearance: 'Appearance',
       customizeView: 'Customize your view',
@@ -82,6 +86,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ language, setLanguage, prof
       fullName: 'পুরো নাম',
       role: 'পদবী',
       saveChanges: 'পরিবর্তন সংরক্ষণ করুন',
+      saving: 'সংরক্ষণ হচ্ছে...',
       editProfile: 'ইডিট প্রোফাইল',
       appearance: 'চেহারা',
       customizeView: 'আপনার ভিউ কাস্টমাইজ করুন',
@@ -133,10 +138,30 @@ const SettingsView: React.FC<SettingsViewProps> = ({ language, setLanguage, prof
     }
   };
 
-  const handleProfileButtonClick = () => {
+  const handleProfileButtonClick = async () => {
     if (isEditingProfile) {
-      setProfile(tempProfile);
-      setIsEditingProfile(false);
+      setIsSaving(true);
+      try {
+        // Persist profile changes to Supabase Auth Metadata
+        const { error } = await supabase.auth.updateUser({
+          data: {
+            name: tempProfile.name,
+            role: tempProfile.role,
+            imageUrl: tempProfile.imageUrl
+          }
+        });
+
+        if (error) throw error;
+
+        // Update local state
+        setProfile(tempProfile);
+        setIsEditingProfile(false);
+      } catch (err: any) {
+        console.error('Failed to update profile:', err.message);
+        alert(language === 'English' ? 'Failed to save changes' : 'পরিবর্তন সংরক্ষণ করতে ব্যর্থ হয়েছে');
+      } finally {
+        setIsSaving(false);
+      }
     } else {
       setTempProfile(profile);
       setIsEditingProfile(true);
@@ -213,16 +238,23 @@ const SettingsView: React.FC<SettingsViewProps> = ({ language, setLanguage, prof
               <div className="flex gap-2 w-full mt-8">
                 <button 
                   onClick={handleProfileButtonClick}
-                  className={`flex-1 h-11 rounded-xl font-black text-[11px] uppercase transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                  disabled={isSaving}
+                  className={`flex-1 h-11 rounded-xl font-black text-[11px] uppercase transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-70 ${
                     isEditingProfile 
                     ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/20' 
                     : 'bg-purple-600 hover:bg-purple-700 text-white shadow-lg shadow-purple-600/20'
                   }`}
                 >
-                  {isEditingProfile ? <Save size={16} /> : <Pencil size={14} />}
-                  {isEditingProfile ? t.saveChanges : t.editProfile}
+                  {isSaving ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : isEditingProfile ? (
+                    <Save size={16} />
+                  ) : (
+                    <Pencil size={14} />
+                  )}
+                  {isSaving ? t.saving : (isEditingProfile ? t.saveChanges : t.editProfile)}
                 </button>
-                {isEditingProfile && (
+                {isEditingProfile && !isSaving && (
                   <button 
                     onClick={() => setIsEditingProfile(false)}
                     className="w-11 h-11 flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-xl hover:bg-rose-50 hover:text-rose-600 transition-all active:scale-95"
